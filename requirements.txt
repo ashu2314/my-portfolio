@@ -1,0 +1,7 @@
+streamlit
+yfinance
+plotly
+pandas
+streamlit_option_menu
+watchdog
+streamlit-searchbox
