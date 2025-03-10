@@ -7,7 +7,6 @@ from streamlit_option_menu import option_menu
 import numpy as np
 from datetime import date, datetime, timedelta
 from plotly import graph_objs as go
-from prophet import Prophet
 
 
 st.set_page_config(page_title="My Portfolio", page_icon=":moneybag:", layout="wide")
