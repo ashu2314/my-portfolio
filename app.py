@@ -216,7 +216,7 @@ col1.html(
     f"""
     Total Investment
     <p style='margin-bottom: auto; font-weight: bold; color: darkblue'>
-        {'Rs {:,.2f}'.format(st.session_state['investment'])}
+        {'Rs {:,.3f}'.format(st.session_state['investment'])}
     </div>
     """
 )
@@ -224,7 +224,7 @@ col2.html(
     f"""
     Current Value
     <p style='margin-bottom: auto; font-weight: bold; color: blue'>
-        {'Rs {:,.2f}'.format(st.session_state['current_value'])}
+        {'Rs {:,.3f}'.format(st.session_state['current_value'])}
     </div>
     """
 )
@@ -232,7 +232,7 @@ col3.html(
     f"""
     Total Profit/Loss
     <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit'])}'>
-        {'Rs {:,.2f}'.format(st.session_state['profit'])}
+        {'Rs {:,.3f}'.format(st.session_state['profit'])}
     </div>
     """
 )
@@ -240,7 +240,7 @@ col3.html(
     f"""
     Total Profit/Loss %
     <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit_percentage'])}'>
-        {'{:,.2f} %'.format(st.session_state['profit_percentage'])}
+        {'{:,.3f} %'.format(st.session_state['profit_percentage'])}
     </div>
     """
 )
@@ -249,7 +249,7 @@ col4.html(
     f"""
     Today's Profit/Loss
     <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit_today'])}'>
-        {'Rs {:,.2f}'.format(st.session_state['profit_today'])}
+        {'Rs {:,.3f}'.format(st.session_state['profit_today'])}
     </div>
     """
 )
@@ -257,7 +257,7 @@ col4.html(
     f"""
     Today's Profit/Loss %
     <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit_percentage_today'])}'>
-        {'{:,.2f} %'.format(st.session_state['profit_percentage_today'])}
+        {'{:,.3f} %'.format(st.session_state['profit_percentage_today'])}
     </div>
     """
 )
