@@ -11,7 +11,6 @@ from plotly import graph_objs as go
 
 st.set_page_config(page_title="My Portfolio", page_icon=":moneybag:", layout="wide")
 # st.title("")
-st.subheader("My Portfolio", divider="rainbow")
 
 if "investment" not in st.session_state:
     st.session_state["investment"] = float(0)
@@ -27,6 +26,10 @@ if "previous_investment" not in st.session_state:
     st.session_state["previous_investment"] = float(0)
 if "profit_percentage_today" not in st.session_state:
     st.session_state["profit_percentage_today"] = float(0)
+if "folio_name" not in st.session_state:
+    st.session_state["folio_name"] = None
+if "stocks_file_name" not in st.session_state:
+    st.session_state["stocks_file_name"] = None
 
 
 def find_stock(search_term: str):
@@ -50,9 +53,38 @@ def get_prices(df):
     return prices.tickers
 
 
+def get_file_name():
+    return (
+        st.session_state.stocks_file_name
+        if st.session_state.stocks_file_name
+        else "stocks.csv"
+    )
+
+
 def load_csv():
-    df = pd.read_csv("./data/stocks.csv")
-    df["buy_date"] = pd.to_datetime(df["buy_date"], yearfirst=True).dt.date
+    stocks_file_name = get_file_name()
+    try:
+        df = pd.read_csv(f"./data/{stocks_file_name}")
+        df["buy_date"] = pd.to_datetime(df["buy_date"], yearfirst=True).dt.date
+
+    except FileNotFoundError:
+        df = pd.DataFrame(
+            columns=[
+                "symbol",
+                "stock_name",
+                "buy_date",
+                "buy_price",
+                "quantity",
+                "price",
+                "investment",
+                "current_value",
+                "profit",
+                "profit_percentage",
+                "profit_today",
+                "profit_percentage_today",
+            ]
+        )
+
     return df
 
 
@@ -87,21 +119,40 @@ def calculate_prices(df):
         df.at[index, "profit_today"] = profit_today
         df.at[index, "profit_percentage_today"] = profit_percentage_today
 
-    st.session_state["investment"] = df["investment"].sum()
-    st.session_state["current_value"] = df["current_value"].sum()
-    st.session_state["profit"] = df["profit"].sum()
-    st.session_state["profit_percentage"] = (
-        st.session_state["profit"] * 100 / st.session_state["investment"]
-    )
-    st.session_state["profit_today"] = df["profit_today"].sum()
-    st.session_state["profit_percentage_today"] = (
-        st.session_state["profit_today"] * 100 / st.session_state["previous_investment"]
-    )
+    if len(df["symbol"]) > 0:
+        st.session_state["investment"] = df["investment"].sum()
+        st.session_state["current_value"] = df["current_value"].sum()
+        st.session_state["profit"] = df["profit"].sum()
+        st.session_state["profit_percentage"] = (
+            st.session_state["profit"] * 100 / st.session_state["investment"]
+        )
+        st.session_state["profit_today"] = df["profit_today"].sum()
+        st.session_state["profit_percentage_today"] = (
+            st.session_state["profit_today"]
+            * 100
+            / st.session_state["previous_investment"]
+        )
 
     return df
 
 
-if "df" not in st.session_state:
+@st.dialog("Folio form")
+def open_folio_form():
+    folio_form = st.form(key="Folio form")
+    folio_name = folio_form.text_input(
+        "Portfolio Name",
+        max_chars=30,
+        placeholder="Enter the folio name to fetch details",
+    )
+    if folio_form.form_submit_button("Fetch", icon="💾"):
+        st.session_state["folio_name"] = folio_name
+        st.session_state["stocks_file_name"] = f"{folio_name.replace(" ", "_")}.csv"
+        st.rerun()
+
+
+if not st.session_state["stocks_file_name"]:
+    open_folio_form()
+elif "df" not in st.session_state:
     df = load_csv()
     st.session_state["df"] = calculate_prices(df)
 # st.write(st.session_state["df"])
@@ -159,7 +210,8 @@ def save(changed_df):
     df_to_save = changed_df.filter(
         ["symbol", "stock_name", "buy_date", "buy_price", "quantity"], axis=1
     )
-    df_to_save.to_csv("./data/stocks.csv", index=False)
+    stocks_file_name = get_file_name()
+    df_to_save.to_csv(f"./data/{stocks_file_name}", index=False)
     st.session_state["df"] = calculate_prices(df_to_save)
 
 
@@ -208,63 +260,68 @@ if not st.session_state["selected_stock_name"]:
                     st.rerun()
 
 
-col1, col2, col3, col4 = st.columns(
-    4, border=False, vertical_alignment="bottom", gap="large"
+st.subheader(
+    f"My Portfolio: {st.session_state.folio_name if st.session_state.folio_name else ''}",
+    divider="rainbow",
 )
 
-col1.html(
-    f"""
-    Total Investment
-    <p style='margin-bottom: auto; font-weight: bold; color: darkblue'>
-        {'Rs {:,.3f}'.format(st.session_state['investment'])}
-    </div>
-    """
-)
-col2.html(
-    f"""
-    Current Value
-    <p style='margin-bottom: auto; font-weight: bold; color: blue'>
-        {'Rs {:,.3f}'.format(st.session_state['current_value'])}
-    </div>
-    """
-)
-col3.html(
-    f"""
-    Total Profit/Loss
-    <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit'])}'>
-        {'Rs {:,.3f}'.format(st.session_state['profit'])}
-    </div>
-    """
-)
-col3.html(
-    f"""
-    Total Profit/Loss %
-    <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit_percentage'])}'>
-        {'{:,.3f} %'.format(st.session_state['profit_percentage'])}
-    </div>
-    """
-)
-
-col4.html(
-    f"""
-    Today's Profit/Loss
-    <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit_today'])}'>
-        {'Rs {:,.3f}'.format(st.session_state['profit_today'])}
-    </div>
-    """
-)
-col4.html(
-    f"""
-    Today's Profit/Loss %
-    <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit_percentage_today'])}'>
-        {'{:,.3f} %'.format(st.session_state['profit_percentage_today'])}
-    </div>
-    """
-)
 
 # st.subheader("", divider="rainbow")
 
-if len(st.session_state["df"]) > 0:
+if "df" in st.session_state:
+    col1, col2, col3, col4 = st.columns(
+        4, border=False, vertical_alignment="bottom", gap="large"
+    )
+
+    col1.html(
+        f"""
+        Total Investment
+        <p style='margin-bottom: auto; font-weight: bold; color: darkblue'>
+            {'Rs {:,.3f}'.format(st.session_state['investment'])}
+        </div>
+        """
+    )
+    col2.html(
+        f"""
+        Current Value
+        <p style='margin-bottom: auto; font-weight: bold; color: blue'>
+            {'Rs {:,.3f}'.format(st.session_state['current_value'])}
+        </div>
+        """
+    )
+    col3.html(
+        f"""
+        Total Profit/Loss
+        <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit'])}'>
+            {'Rs {:,.3f}'.format(st.session_state['profit'])}
+        </div>
+        """
+    )
+    col3.html(
+        f"""
+        Total Profit/Loss %
+        <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit_percentage'])}'>
+            {'{:,.3f} %'.format(st.session_state['profit_percentage'])}
+        </div>
+        """
+    )
+
+    col4.html(
+        f"""
+        Today's Profit/Loss
+        <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit_today'])}'>
+            {'Rs {:,.3f}'.format(st.session_state['profit_today'])}
+        </div>
+        """
+    )
+    col4.html(
+        f"""
+        Today's Profit/Loss %
+        <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit_percentage_today'])}'>
+            {'{:,.3f} %'.format(st.session_state['profit_percentage_today'])}
+        </div>
+        """
+    )
 
     @st.dialog("Edit a stock")
     def open_edit_stock(row_num: int):
