@@ -7,6 +7,7 @@ from streamlit_option_menu import option_menu
 import numpy as np
 from datetime import date, datetime, timedelta
 from plotly import graph_objs as go
+from babel.numbers import format_currency
 
 
 st.set_page_config(page_title="My Portfolio", page_icon=":moneybag:", layout="wide")
@@ -277,7 +278,7 @@ if "df" in st.session_state:
         f"""
         Total Investment
         <p style='margin-bottom: auto; font-weight: bold; color: darkblue'>
-            {'Rs {:,.3f}'.format(st.session_state['investment'])}
+            {format_currency(st.session_state['investment'], 'INR', locale='en_IN').replace(u'\xa0', u' ')}
         </div>
         """
     )
@@ -285,7 +286,7 @@ if "df" in st.session_state:
         f"""
         Current Value
         <p style='margin-bottom: auto; font-weight: bold; color: blue'>
-            {'Rs {:,.3f}'.format(st.session_state['current_value'])}
+            {format_currency(st.session_state['current_value'], 'INR', locale='en_IN').replace(u'\xa0', u' ')}
         </div>
         """
     )
@@ -293,7 +294,7 @@ if "df" in st.session_state:
         f"""
         Total Profit/Loss
         <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit'])}'>
-            {'Rs {:,.3f}'.format(st.session_state['profit'])}
+            {format_currency(st.session_state['profit'], 'INR', locale='en_IN').replace(u'\xa0', u' ')}
         </div>
         """
     )
@@ -310,7 +311,7 @@ if "df" in st.session_state:
         f"""
         Today's Profit/Loss
         <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit_today'])}'>
-            {'Rs {:,.3f}'.format(st.session_state['profit_today'])}
+            {format_currency(st.session_state['profit_today'], 'INR', locale='en_IN').replace(u'\xa0', u' ')}
         </div>
         """
     )
@@ -434,6 +435,7 @@ if "df" in st.session_state:
             ),
         },
         hide_index=True,
+        use_container_width=True,
     )
 
     st.html(
