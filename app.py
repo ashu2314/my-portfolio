@@ -8,11 +8,18 @@ import numpy as np
 from datetime import date, datetime, timedelta
 from plotly import graph_objs as go
 from babel.numbers import format_currency
+import pyodbc
+from cryptography.fernet import Fernet
 
 
 st.set_page_config(page_title="My Portfolio", page_icon=":moneybag:", layout="wide")
-# st.title("")
 
+if "show_login" not in st.session_state:
+    st.session_state["show_login"] = True
+if "login_success" not in st.session_state:
+    st.session_state["login_success"] = False
+if "user_id" not in st.session_state:
+    st.session_state["user_id"] = ""
 if "investment" not in st.session_state:
     st.session_state["investment"] = float(0)
 if "current_value" not in st.session_state:
@@ -27,10 +34,67 @@ if "previous_investment" not in st.session_state:
     st.session_state["previous_investment"] = float(0)
 if "profit_percentage_today" not in st.session_state:
     st.session_state["profit_percentage_today"] = float(0)
-if "folio_name" not in st.session_state:
-    st.session_state["folio_name"] = None
-if "stocks_file_name" not in st.session_state:
-    st.session_state["stocks_file_name"] = None
+if "user_name" not in st.session_state:
+    st.session_state["user_name"] = None
+
+
+@st.cache_resource(show_spinner="Initialising...Please wait!!!")
+def init_connection():
+    return pyodbc.connect(
+        "DRIVER={ODBC Driver 17 for SQL Server};SERVER="
+        + st.secrets["DB_SERVER"]
+        + ";DATABASE="
+        + st.secrets["DB"]
+        + ";UID="
+        + st.secrets["DB_USER"]
+        + ";PWD="
+        + st.secrets["DB_PASSWORD"],
+        timeout=30,
+    )
+
+
+@st.cache_data(ttl=600)
+def execute_query_cached(query, *params):
+    conn = init_connection()
+    with conn.cursor() as cur:
+        try:
+            cur.execute(query, params)
+            return cur.fetchall()
+        except Exception as e:
+            st.error(f"Error occurred: {e}")
+
+
+def execute_query(query, *params):
+    conn = init_connection()
+    with conn.cursor() as cur:
+        try:
+            cur.execute(query, params)
+            return cur.fetchall()
+        except Exception as e:
+            st.error(f"Error occurred: {e}")
+
+
+def execute_update(query, *params):
+    conn = init_connection()
+    with conn.cursor() as cur:
+        try:
+            cur.execute(query, params)
+            cur.commit()
+        except Exception as e:
+            st.error(f"Error occurred: {e}")
+
+
+@st.cache_resource
+def init_fernet():
+    return Fernet(st.secrets["SECRET_KEY"])
+
+
+def decrypt_password(encrypted_password: str):
+    return init_fernet().decrypt(encrypted_password.encode()).decode()
+
+
+def encrypt_password(decrypted_password: str):
+    return init_fernet().encrypt(decrypted_password.encode()).decode()
 
 
 def find_stock(search_term: str):
@@ -38,13 +102,27 @@ def find_stock(search_term: str):
         return []
     else:
         return [
-            f"{quote['shortname']}:{quote['exchange']}:::{quote['symbol']}"
+            f"{quote['shortname']}:::{quote['exchange']}:::{quote['symbol']}"
             for quote in yf.Search(search_term, include_cb=False).quotes
         ]
 
 
 def find_stock_price(symbol: str):
     return yf.Ticker(symbol)
+
+
+def find_prices(symbol: str):
+    nifty = yf.Ticker(symbol)
+    # current = nifty.history(period="5d")["Close"].iloc[-1]
+    # last = nifty.history(period="5d")["Close"].iloc[-2]
+    current = nifty.history_metadata["regularMarketPrice"]
+    last = nifty.history_metadata["chartPreviousClose"]
+    change = current - last
+    percentage_change = (change / last) * 100
+    current_formatted = f"₹{current:.2f}"
+    change_formatted = f"{change:.2f}"
+    percentage_change_formatted = f"{percentage_change:.2f}%"
+    return current_formatted, change_formatted, percentage_change_formatted
 
 
 def get_prices(df):
@@ -54,21 +132,15 @@ def get_prices(df):
     return prices.tickers
 
 
-def get_file_name():
-    return (
-        st.session_state.stocks_file_name
-        if st.session_state.stocks_file_name
-        else "stocks.csv"
+def fetch_stocks(user_id: str):
+    df = pd.read_sql(
+        con=init_connection(),
+        sql="select symbol, stock_name, buy_date, buy_price, quantity from stocks where user_id = ?;",
+        params=user_id,
     )
-
-
-def load_csv():
-    stocks_file_name = get_file_name()
-    try:
-        df = pd.read_csv(f"./data/{stocks_file_name}")
+    if len(df) > 0:
         df["buy_date"] = pd.to_datetime(df["buy_date"], yearfirst=True).dt.date
-
-    except FileNotFoundError:
+    else:
         df = pd.DataFrame(
             columns=[
                 "symbol",
@@ -137,24 +209,8 @@ def calculate_prices(df):
     return df
 
 
-@st.dialog("Folio form")
-def open_folio_form():
-    folio_form = st.form(key="Folio form")
-    folio_name = folio_form.text_input(
-        "Portfolio Name",
-        max_chars=30,
-        placeholder="Enter the folio name to fetch details",
-    )
-    if folio_form.form_submit_button("Fetch", icon="💾"):
-        st.session_state["folio_name"] = folio_name
-        st.session_state["stocks_file_name"] = f"{folio_name.replace(" ", "_")}.csv"
-        st.rerun()
-
-
-if not st.session_state["stocks_file_name"]:
-    open_folio_form()
-elif "df" not in st.session_state:
-    df = load_csv()
+if "df" not in st.session_state and st.session_state["login_success"]:
+    df = fetch_stocks(st.session_state.user_id)
     st.session_state["df"] = calculate_prices(df)
 # st.write(st.session_state["df"])
 
@@ -165,230 +221,357 @@ if "selected_stock" not in st.session_state:
     st.session_state["selected_stock"] = None
 
 
-def add_stock(
-    symbol: str, stock_name: str, buy_date: date, buy_price: float, quantity: int
+def save_stock(
+    symbol: str,
+    stock_name: str = None,
+    buy_date: date = None,
+    buy_price: float = None,
+    quantity: int = None,
 ):
-    df = st.session_state["df"].filter(
-        ["symbol", "stock_name", "buy_date", "buy_price", "quantity"], axis=1
+    user_id = st.session_state.user_id
+    try:
+        if not stock_name and not buy_date:
+            execute_update(
+                "delete from stocks where symbol = ? and user_id = ?;",
+                symbol,
+                user_id,
+            )
+            st.write(f"'{symbol}' deleted successfully!!!")
+        elif not stock_name and buy_date:
+            execute_update(
+                """update stocks 
+                    set buy_date = ?, buy_price = ?, quantity = ? 
+                    where symbol = ? and user_id = ?;""",
+                buy_date,
+                buy_price,
+                quantity,
+                symbol,
+                user_id,
+            )
+            st.write(f"'{symbol}' updated successfully!!!")
+        else:
+            execute_update(
+                """insert into stocks
+                        (user_id, symbol, stock_name, buy_date, buy_price, quantity) 
+                        values(?, ?, ?, ?, ?, ?);""",
+                user_id,
+                symbol,
+                stock_name,
+                buy_date,
+                buy_price,
+                quantity,
+            )
+            st.write(f"'{stock_name}' added successfully!!!")
+        refresh_data()
+
+    except Exception as e:
+        st.error(f"Error occurred: {e}")
+
+
+def refresh_data():
+    st.session_state.pop("df", None)
+    st.rerun()
+
+
+@st.dialog("Search and add stock")
+def open_add_stock():
+    st.session_state["selected_stock_name"] = st_searchbox(
+        find_stock,
+        "\n\nSearch for a stock",
+        rerun_scope="fragment",
+        clear_on_submit=True,
     )
-    new_row = [symbol, stock_name, buy_date, buy_price, quantity]
-    new_df = pd.DataFrame(
-        columns=df.columns,
-        data=[new_row],
-    )
-    df = pd.concat([df, new_df], axis=0, ignore_index=True)
-    save(df)
-    st.session_state["selected_stock_name"] = None
-    # st.session_state["selected_stock"] = None
+    selected_stock_name = st.session_state["selected_stock_name"]
+    if selected_stock_name:
+        # st.write(selected_stock_name)
+        symbol = selected_stock_name.split(":::")[2]
+        quote_name = selected_stock_name.split(":::")[0]
+        st.session_state["selected_stock"] = find_stock_price(symbol)
+        selected_stock = st.session_state["selected_stock"]
+        if selected_stock:
+            st.write(f"Name: {selected_stock.info.get('shortName', 'N/A')}")
+            st.write(f"Price: {selected_stock.info.get('currentPrice')}")
+            # st.write(
+            # "{:.2f}".format(selected_stock.history(period="1d", interval="1m")["Close"][0])
+            # )
+
+            stocks_form = st.form(key="Add stocks")
+            stock_name = stocks_form.text_input(
+                "Stock Name", value=quote_name, disabled=True
+            )
+            buy_date = stocks_form.date_input(
+                "Stock buy date",
+                value="today",
+                help="When did you buy this?",
+                min_value="2000-01-01",
+                max_value=date.today(),
+                format="YYYY-MM-DD",
+            )
+            buy_price = stocks_form.number_input(
+                "Stock buy price",
+                step=0.01,
+                min_value=0.01,
+                format="%.2f",
+            )
+            quantity = stocks_form.number_input("Quantity", step=1, min_value=1)
+            if stocks_form.form_submit_button("Add"):
+                st.session_state.pop("selected_stock_name", None)
+                save_stock(symbol, stock_name, buy_date, buy_price, quantity)
 
 
-def save_stock(buy_date: date, buy_price: float, quantity: int, row_num: int):
-    df = st.session_state["df"].filter(
-        ["symbol", "stock_name", "buy_date", "buy_price", "quantity"], axis=1
-    )
-    # st.write(df.iloc[row_num])
-    df.loc[row_num, "buy_date"] = buy_date
-    df.loc[row_num, "buy_price"] = buy_price
-    df.loc[row_num, "quantity"] = quantity
-    # st.write(df.iloc[row_num])
-    # df.iloc[row_num][4]
-    save(df)
-
-
-def delete_stock(row_num: int):
-    df = st.session_state["df"].filter(
-        ["symbol", "stock_name", "buy_date", "buy_price", "quantity"], axis=1
-    )
-    df.drop([row_num], inplace=True)
-    # st.write(df.iloc[row_num])
-    df.iloc[row_num]
-    df.reset_index()
-    # st.write(df.iloc[row_num])
-    save(df)
-
-
-def save(changed_df):
-    df_to_save = changed_df.filter(
-        ["symbol", "stock_name", "buy_date", "buy_price", "quantity"], axis=1
-    )
-    stocks_file_name = get_file_name()
-    df_to_save.to_csv(f"./data/{stocks_file_name}", index=False)
-    st.session_state["df"] = calculate_prices(df_to_save)
-
-
-if not st.session_state["selected_stock_name"]:
-
-    @st.dialog("Search and add stock")
-    def open_add_stock():
-        st.session_state["selected_stock_name"] = st_searchbox(
-            find_stock, "\n\nSearch for a stock", rerun_scope="fragment"
+@st.dialog("Edit a stock")
+def open_edit_stock(row_num: int):
+    selected_row = st.session_state["df"].iloc[row_num]
+    # st.write(selected_row)
+    if not selected_row.empty:
+        symbol = selected_row["symbol"]
+        quote_name = selected_row["stock_name"]
+        stocks_edit_form = st.form(key="Edit stock")
+        stocks_edit_form.text_input("Stock Name", value=quote_name, disabled=True)
+        buy_date = stocks_edit_form.date_input(
+            "Stock buy date",
+            value=selected_row["buy_date"],
+            help="When did you buy this?",
+            min_value="2000-01-01",
+            max_value=date.today(),
+            format="YYYY-MM-DD",
         )
-        selected_stock_name = st.session_state["selected_stock_name"]
-        if selected_stock_name:
-            # st.write(selected_stock_name)
-            symbol = selected_stock_name.split(":::")[1]
-            quote_name = selected_stock_name.split(":::")[0]
-            st.session_state["selected_stock"] = find_stock_price(symbol)
-            selected_stock = st.session_state["selected_stock"]
-            if selected_stock:
-                st.write(f"Name: {selected_stock.info.get('shortName', 'N/A')}")
-                st.write(f"Price: {selected_stock.info.get('currentPrice')}")
-                # st.write(
-                # "{:.2f}".format(selected_stock.history(period="1d", interval="1m")["Close"][0])
-                # )
-
-                stocks_form = st.form(key="Add stocks")
-                stock_name = stocks_form.text_input(
-                    "Stock Name", value=quote_name, disabled=True
-                )
-                buy_date = stocks_form.date_input(
-                    "Stock buy date",
-                    value="today",
-                    help="When did you buy this?",
-                    min_value="2000-01-01",
-                    max_value=date.today(),
-                    format="YYYY-MM-DD",
-                )
-                buy_price = stocks_form.number_input(
-                    "Stock buy price",
-                    step=0.01,
-                    min_value=0.01,
-                    format="%.2f",
-                )
-                quantity = stocks_form.number_input("Quantity", step=1, min_value=1)
-                if stocks_form.form_submit_button("Add"):
-                    add_stock(symbol, stock_name, buy_date, buy_price, quantity)
-                    st.rerun()
+        buy_price = stocks_edit_form.number_input(
+            "Stock buy price",
+            step=0.01,
+            min_value=0.01,
+            format="%.2f",
+            value=selected_row["buy_price"],
+        )
+        quantity = stocks_edit_form.number_input(
+            "Quantity", step=1, min_value=1, value=selected_row["quantity"]
+        )
+        if stocks_edit_form.form_submit_button("Save"):
+            save_stock(symbol, None, buy_date, buy_price, quantity)
 
 
-st.subheader(
-    f"My Portfolio: {st.session_state.folio_name if st.session_state.folio_name else ''}",
-    divider="rainbow",
-)
+@st.dialog("Delete a stock")
+def open_delete_stock(row_num: int):
+    selected_row = st.session_state["df"].iloc[row_num]
+    # st.write(selected_row)
+    if not selected_row.empty:
+        symbol = selected_row["symbol"]
+        quote_name = selected_row["stock_name"]
+        stocks_delete_form = st.form(key="Delete stock")
+        stocks_delete_form.text_input("Stock Name", value=quote_name, disabled=True)
+        stocks_delete_form.date_input(
+            "Stock buy date",
+            value=selected_row["buy_date"],
+            help="When did you buy this?",
+            min_value="2000-01-01",
+            max_value=date.today(),
+            format="YYYY-MM-DD",
+            disabled=True,
+        )
+        stocks_delete_form.number_input(
+            "Stock buy price",
+            step=0.01,
+            min_value=0.01,
+            format="%.2f",
+            value=selected_row["buy_price"],
+            disabled=True,
+        )
+        stocks_delete_form.number_input(
+            "Quantity",
+            step=1,
+            min_value=1,
+            value=selected_row["quantity"],
+            disabled=True,
+        )
+        if stocks_delete_form.form_submit_button("Delete"):
+            save_stock(symbol)
 
 
-# st.subheader("", divider="rainbow")
+def show_login_form(is_login: bool):
+    st.session_state.show_login = is_login
 
-if "df" in st.session_state:
-    col1, col2, col3, col4 = st.columns(
-        4, border=False, vertical_alignment="bottom", gap="large"
-    )
 
-    col1.html(
-        f"""
-        Total Investment
-        <p style='margin-bottom: auto; font-weight: bold; color: darkblue'>
-            {format_currency(st.session_state['investment'], 'INR', locale='en_IN').replace(u'\xa0', u' ')}
-        </div>
-        """
-    )
-    col2.html(
-        f"""
-        Current Value
-        <p style='margin-bottom: auto; font-weight: bold; color: blue'>
-            {format_currency(st.session_state['current_value'], 'INR', locale='en_IN').replace(u'\xa0', u' ')}
-        </div>
-        """
-    )
-    col3.html(
-        f"""
-        Total Profit/Loss
-        <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit'])}'>
-            {format_currency(st.session_state['profit'], 'INR', locale='en_IN').replace(u'\xa0', u' ')}
-        </div>
-        """
-    )
-    col3.html(
-        f"""
-        Total Profit/Loss %
-        <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit_percentage'])}'>
-            {'{:,.3f} %'.format(st.session_state['profit_percentage'])}
-        </div>
-        """
-    )
+def login(user_id_param, password_param):
+    user_id_lower = user_id_param.lower().replace(" ", "")
+    try:
+        rows = execute_query("select * from users where user_id = ?;", user_id_lower)
+        # Print results.
+        for user in rows:
+            decrypted_password = decrypt_password(user.user_pass)
+            if decrypted_password == password_param:
+                st.session_state.name = user.name
+                st.session_state.login_success = True
+                st.session_state.user_id = user.id
+                st.session_state.user_name = user.name
 
-    col4.html(
-        f"""
-        Today's Profit/Loss
-        <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit_today'])}'>
-            {format_currency(st.session_state['profit_today'], 'INR', locale='en_IN').replace(u'\xa0', u' ')}
-        </div>
-        """
-    )
-    col4.html(
-        f"""
-        Today's Profit/Loss %
-        <p style='margin-bottom: auto; font-weight: bold; {color_profit_loss(st.session_state['profit_percentage_today'])}'>
-            {'{:,.3f} %'.format(st.session_state['profit_percentage_today'])}
-        </div>
-        """
-    )
+        if st.session_state.login_success:
+            st.write("Successfully logged in!!!")
+            st.rerun()
+        else:
+            st.write("Incorrect userId/password!!!")
+    except Exception as e:
+        st.error(f"Error occurred: {e}")
 
-    @st.dialog("Edit a stock")
-    def open_edit_stock(row_num: int):
-        selected_row = st.session_state["df"].iloc[row_num]
-        # st.write(selected_row)
-        if not selected_row.empty:
-            quote_name = selected_row["stock_name"]
-            stocks_edit_form = st.form(key="Edit stock")
-            stocks_edit_form.text_input("Stock Name", value=quote_name, disabled=True)
-            buy_date = stocks_edit_form.date_input(
-                "Stock buy date",
-                value=selected_row["buy_date"],
-                help="When did you buy this?",
-                min_value="2000-01-01",
-                max_value=date.today(),
-                format="YYYY-MM-DD",
+
+def register(name_param, user_id_param, password_param):
+    user_id_lower = user_id_param.lower()
+    try:
+        rows = execute_query("select * from users where user_id = ?;", user_id_lower)
+        if len(rows) > 0:
+            st.write(f"User Id '{user_id_param}' already registered!!!")
+            show_login_form(True)
+        else:
+            encrypted_password = encrypt_password(password_param)
+            execute_update(
+                "insert into users (name, user_id, user_pass) values(?,?,?);",
+                name_param,
+                user_id_lower,
+                encrypted_password,
             )
-            buy_price = stocks_edit_form.number_input(
-                "Stock buy price",
-                step=0.01,
-                min_value=0.01,
-                format="%.2f",
-                value=selected_row["buy_price"],
-            )
-            quantity = stocks_edit_form.number_input(
-                "Quantity", step=1, min_value=1, value=selected_row["quantity"]
-            )
-            if stocks_edit_form.form_submit_button("Save"):
-                save_stock(buy_date, buy_price, quantity, row_num)
-                st.rerun()
+            st.write("Registered successfully!!!")
+            show_login_form(True)
 
-    @st.dialog("Delete a stock")
-    def open_delete_stock(row_num: int):
-        selected_row = st.session_state["df"].iloc[row_num]
-        # st.write(selected_row)
-        if not selected_row.empty:
-            quote_name = selected_row["stock_name"]
-            stocks_delete_form = st.form(key="Delete stock")
-            stocks_delete_form.text_input("Stock Name", value=quote_name, disabled=True)
-            stocks_delete_form.date_input(
-                "Stock buy date",
-                value=selected_row["buy_date"],
-                help="When did you buy this?",
-                min_value="2000-01-01",
-                max_value=date.today(),
-                format="YYYY-MM-DD",
-                disabled=True,
-            )
-            stocks_delete_form.number_input(
-                "Stock buy price",
-                step=0.01,
-                min_value=0.01,
-                format="%.2f",
-                value=selected_row["buy_price"],
-                disabled=True,
-            )
-            stocks_delete_form.number_input(
-                "Quantity",
-                step=1,
-                min_value=1,
-                value=selected_row["quantity"],
-                disabled=True,
-            )
-            if stocks_delete_form.form_submit_button("Delete"):
-                delete_stock(row_num)
-                st.rerun()
+    except Exception as e:
+        st.error(f"Error occurred: {e}")
+
+
+@st.dialog("Login form")
+def open_login_form():
+    if not st.session_state.login_success and st.session_state.show_login:
+        st.title("Register")
+        user_id = st.text_input(
+            label="User Id",
+            key="userid_login",
+            max_chars=40,
+            placeholder="Enter your user id",
+        )
+        password = st.text_input(
+            label="Password",
+            key="pass_login",
+            type="password",
+            max_chars=40,
+            placeholder="Enter your password",
+        )
+
+        if st.button("Login", key="login", disabled=(user_id == "" or password == "")):
+            login(user_id, password)
+        if st.button("Signup", key="showSignup"):
+            show_login_form(False)
+
+    elif not st.session_state.login_success and not st.session_state.show_login:
+        st.title("Register")
+        name = st.text_input(
+            label="Name",
+            key="name_register",
+            max_chars=40,
+            placeholder="Enter your name",
+        )
+        user_id = st.text_input(
+            label="User Id",
+            key="userid_register",
+            max_chars=40,
+            placeholder="Enter your user id",
+        )
+        password = st.text_input(
+            label="Password",
+            key="pass_register",
+            type="password",
+            max_chars=40,
+            placeholder="Enter your password",
+        )
+        if st.button(
+            "Signup",
+            key="signup",
+            on_click=register,
+            args=(name, user_id, password),
+            disabled=(user_id == "" or password == "" or name == ""),
+        ):
+            register(name, user_id, password)
+        if st.button("Login", key="showLogin"):
+            show_login_form(True)
+
+
+st.subheader("Market", divider="rainbow")
+current_nifty, change_nifty, percentage_change_nifty = find_prices("^NSEI")
+current_mid, change_mid, percentage_change_mid = find_prices("NIFTYMIDCAP150.NS")
+current_small, change_small, percentage_change_small = find_prices("NIFTYSMLCAP250.NS")
+current_bank, change_bank, percentage_change_bank = find_prices("^NSEBANK")
+col1, col2, col3, col4, col5 = st.columns(5)
+with col1:
+    st.metric(
+        label="Nifty",
+        value=current_nifty,
+        delta=f"{change_nifty} ({percentage_change_nifty})",
+    )
+with col2:
+    st.metric(
+        label="Midcap 150",
+        value=current_mid,
+        delta=f"{change_mid} ({percentage_change_mid})",
+    )
+with col3:
+    st.metric(
+        label="Smallcap 250",
+        value=current_small,
+        delta=f"{change_small} ({percentage_change_small})",
+    )
+with col4:
+    st.metric(
+        label="Bank Nifty",
+        value=current_bank,
+        delta=f"{change_bank} ({percentage_change_bank})",
+    )
+with col5:
+    if st.button(
+        "View Portfolio",
+        key="show_login_key",
+        help="Login to view your portfolio",
+        use_container_width=True,
+        type="primary",
+        disabled=st.session_state.login_success,
+    ):
+        init_connection()
+        open_login_form()
+
+
+if st.session_state.login_success and "df" in st.session_state:
+    st.subheader(
+        f"My Portfolio: {st.session_state.user_name if st.session_state.user_name else ''}",
+        divider="rainbow",
+    )
+
+    if len(st.session_state.df) > 0:
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric(
+            label="Total Investment",
+            value=format_currency(
+                st.session_state["investment"], "INR", locale="en_IN"
+            ).replace("\xa0", " "),
+        )
+        col2.metric(
+            label="Current Value & Total Profit/Loss",
+            value=format_currency(
+                st.session_state["current_value"], "INR", locale="en_IN"
+            ).replace("\xa0", " "),
+            delta=f"{format_currency(st.session_state['profit'], 'INR', locale='en_IN').replace(u'\xa0', u' ')} ({
+            '{:,.3f} %'.format(st.session_state['profit_percentage'])})",
+        )
+        col3.metric(
+            label="Current Value & Today's Profit/Loss",
+            value=format_currency(
+                st.session_state["current_value"], "INR", locale="en_IN"
+            ).replace("\xa0", " "),
+            delta=f"{format_currency(st.session_state['profit_today'], 'INR', locale='en_IN').replace(u'\xa0', u' ')} ({
+            '{:,.3f} %'.format(st.session_state['profit_percentage_today'])})",
+        )
+        if col5.button(
+            "Refresh",
+            key="refresh_key",
+            help="Click to refresh the prices",
+            use_container_width=True,
+            type="primary",
+        ):
+            refresh_data()
 
     event = st.dataframe(
         st.session_state.df.style.map(
@@ -443,32 +626,36 @@ if "df" in st.session_state:
         <hr color="linear-gradient(to right, #ff6c6c, #ffbd45, #3dd56d, #3d9df3, #9a5dff)">
         """
     )
-    # st.subheader("", divider="rainbow")
     is_disabled = len(event.selection.rows) == 0
-    par_button_col1, par_button_col2 = st.columns(
-        2, border=False, vertical_alignment="top", gap="large"
-    )
-    button_col1, button_col2 = par_button_col1.columns(
-        2, border=False, vertical_alignment="top", gap="small"
-    )
-    button_col3, button_col4 = par_button_col2.columns(
-        2, border=False, vertical_alignment="top", gap="small"
-    )
-    if button_col3.button(
-        "Add", key="add", icon="➕", help="Click to search and add a stock"
+    col1, col2, col3, col4, col5 = st.columns(5)
+    if col5.button(
+        "Add",
+        key="add",
+        icon="➕",
+        use_container_width=True,
+        help="Click to search and add a stock",
+        type="primary",
     ):
         open_add_stock()
 
-    if button_col1.button(
-        "Edit", key="edit", disabled=is_disabled, icon="✍️", help="Select a row to edit"
+    if col1.button(
+        "Edit",
+        key="edit",
+        disabled=is_disabled,
+        icon="✍️",
+        use_container_width=True,
+        help="Select a row to edit",
+        type="primary",
     ):
         open_edit_stock(event.selection.rows[0])
 
-    if button_col2.button(
+    if col2.button(
         "Delete",
         key="delete",
         disabled=is_disabled,
-        icon="🗑️",
+        icon="🚮",
+        use_container_width=True,
         help="Select a row to delete",
+        type="primary",
     ):
         open_delete_stock(event.selection.rows[0])
