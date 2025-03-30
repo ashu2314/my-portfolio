@@ -61,7 +61,7 @@ def execute_query_cached(query, *params):
             cur.execute(query, params)
             return cur.fetchall()
         except Exception as e:
-            st.error(f"Error occurred: {e}")
+            st.error("Internal Error occurred!!!")
 
 
 def execute_query(query, *params):
@@ -71,7 +71,7 @@ def execute_query(query, *params):
             cur.execute(query, params)
             return cur.fetchall()
         except Exception as e:
-            st.error(f"Error occurred: {e}")
+            st.error("Internal Error occurred!!!")
 
 
 def execute_update(query, *params):
@@ -81,7 +81,7 @@ def execute_update(query, *params):
             cur.execute(query, params)
             cur.commit()
         except Exception as e:
-            st.error(f"Error occurred: {e}")
+            st.error("Internal Error occurred!!!")
 
 
 @st.cache_resource
@@ -410,7 +410,7 @@ def login(user_id_param, password_param):
         else:
             st.write("Incorrect userId/password!!!")
     except Exception as e:
-        st.error(f"Error occurred: {e}")
+        st.error("Internal Error occurred!!!")
 
 
 def register(name_param, user_id_param, password_param):
@@ -438,7 +438,7 @@ def register(name_param, user_id_param, password_param):
 @st.dialog("Login form")
 def open_login_form():
     if not st.session_state.login_success and st.session_state.show_login:
-        st.title("Register")
+        st.title("Login")
         user_id = st.text_input(
             label="User Id",
             key="userid_login",
