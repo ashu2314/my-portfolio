@@ -10,7 +10,7 @@ from plotly import graph_objs as go
 from babel.numbers import format_currency
 import pyodbc
 from cryptography.fernet import Fernet
-
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="My Portfolio", page_icon=":moneybag:", layout="wide")
 
@@ -36,21 +36,28 @@ if "profit_percentage_today" not in st.session_state:
     st.session_state["profit_percentage_today"] = float(0)
 if "user_name" not in st.session_state:
     st.session_state["user_name"] = None
+if "is_refresh" not in st.session_state:
+    st.session_state["is_refresh"] = False
+if "is_refresh_from_db" not in st.session_state:
+    st.session_state["is_refresh_from_db"] = True
 
 
 @st.cache_resource(show_spinner="Initialising...Please wait!!!")
 def init_connection():
-    return pyodbc.connect(
-        "DRIVER={ODBC Driver 17 for SQL Server};SERVER="
-        + st.secrets["DB_SERVER"]
-        + ";DATABASE="
-        + st.secrets["DB"]
-        + ";UID="
-        + st.secrets["DB_USER"]
-        + ";PWD="
-        + st.secrets["DB_PASSWORD"],
-        timeout=30,
-    )
+    try:
+        return pyodbc.connect(
+            "DRIVER={ODBC Driver 17 for SQL Server};SERVER="
+            + st.secrets["DB_SERVER"]
+            + ";DATABASE="
+            + st.secrets["DB"]
+            + ";UID="
+            + st.secrets["DB_USER"]
+            + ";PWD="
+            + st.secrets["DB_PASSWORD"],
+            timeout=60,
+        )
+    except Exception as e:
+        st.error("Internal Error occurred!!! Try again...")
 
 
 @st.cache_data(ttl=600)
@@ -155,6 +162,7 @@ def fetch_stocks(user_id: str):
                 "profit_percentage",
                 "profit_today",
                 "profit_percentage_today",
+                "link",
             ]
         )
 
@@ -191,6 +199,7 @@ def calculate_prices(df):
         df.at[index, "profit_percentage"] = profit_percentage
         df.at[index, "profit_today"] = profit_today
         df.at[index, "profit_percentage_today"] = profit_percentage_today
+        df.at[index, "link"] = f"https://finance.yahoo.com/chart/{symbol}/"
 
     if len(df["symbol"]) > 0:
         st.session_state["investment"] = df["investment"].sum()
@@ -209,11 +218,15 @@ def calculate_prices(df):
     return df
 
 
-if "df" not in st.session_state and st.session_state["login_success"]:
+if st.session_state.login_success and st.session_state.is_refresh_from_db:
     df = fetch_stocks(st.session_state.user_id)
+    st.session_state.is_refresh_from_db = False
+    st.session_state.is_refresh = False
     st.session_state["df"] = calculate_prices(df)
-# st.write(st.session_state["df"])
-
+elif st.session_state.login_success and st.session_state.is_refresh:
+    st.session_state.is_refresh_from_db = False
+    st.session_state.is_refresh = False
+    st.session_state["df"] = calculate_prices(st.session_state["df"])
 
 if "selected_stock_name" not in st.session_state:
     st.session_state["selected_stock_name"] = None
@@ -262,14 +275,15 @@ def save_stock(
                 quantity,
             )
             st.write(f"'{stock_name}' added successfully!!!")
-        refresh_data()
+        refresh_data(True)
 
     except Exception as e:
-        st.error(f"Error occurred: {e}")
+        st.error("Internal Error occurred!!!")
 
 
-def refresh_data():
-    st.session_state.pop("df", None)
+def refresh_data(is_refresh_from_db: bool = False):
+    st.session_state.is_refresh_from_db = is_refresh_from_db
+    st.session_state.is_refresh = True
     st.rerun()
 
 
@@ -387,6 +401,16 @@ def open_delete_stock(row_num: int):
             save_stock(symbol)
 
 
+@st.dialog("Stock information", width="large")
+def open_stock_info(row_num: int):
+    selected_row = st.session_state["df"].iloc[row_num]
+    # st.write(selected_row)
+    if not selected_row.empty:
+        symbol = selected_row["symbol"]
+        quote_name = selected_row["stock_name"]
+        components.iframe("", height=500)
+
+
 def show_login_form(is_login: bool):
     st.session_state.show_login = is_login
 
@@ -432,7 +456,7 @@ def register(name_param, user_id_param, password_param):
             show_login_form(True)
 
     except Exception as e:
-        st.error(f"Error occurred: {e}")
+        st.error("Internal Error occurred!!!")
 
 
 @st.dialog("Login form")
@@ -587,8 +611,26 @@ if st.session_state.login_success and "df" in st.session_state:
         key="data",
         on_select="rerun",
         selection_mode=["single-row"],
+        column_order=[
+            "link",
+            "stock_name",
+            "buy_date",
+            "buy_price",
+            "quantity",
+            "price",
+            "investment",
+            "current_value",
+            "profit",
+            "profit_percentage",
+            "profit_today",
+            "profit_percentage_today",
+        ],
         column_config={
-            "symbol": "Symbol",
+            "link": st.column_config.LinkColumn(
+                "Symbol",
+                help="Stock information",
+                display_text=r"https://finance\.yahoo\.com/chart/(.*?)/",
+            ),
             "stock_name": "Stock Name",
             "buy_date": st.column_config.DateColumn(
                 "Buy Date",
@@ -601,20 +643,46 @@ if st.session_state.login_success and "df" in st.session_state:
             "buy_price": st.column_config.NumberColumn(
                 "Buy Price",
                 help="Stock buy price",
-                step=0.01,
-                min_value=0.01,
                 format="%.2f",
-                required=True,
             ),
-            "price": "Price",
-            "investment": "Investment",
-            "current_value": "Current Value",
-            "profit": "Profit/Loss",
-            "profit_percentage": "Profit/Loss %",
-            "profit_today": "Today's Profit/Loss",
-            "profit_percentage_today": "Today's Profit/Loss %",
             "quantity": st.column_config.NumberColumn(
-                "Quantity", help="Quantity?", step=1, min_value=1, required=True
+                "Quantity",
+                help="Quantity?",
+            ),
+            "price": st.column_config.NumberColumn(
+                "Price",
+                help="Stock price",
+                format="%.2f",
+            ),
+            "investment": st.column_config.NumberColumn(
+                "Investment",
+                help="Investment",
+                format="%.2f",
+            ),
+            "current_value": st.column_config.NumberColumn(
+                "Market Value",
+                help="Market Value",
+                format="%.2f",
+            ),
+            "profit": st.column_config.NumberColumn(
+                "Profit/Loss",
+                help="Profit/Loss",
+                format="%.2f",
+            ),
+            "profit_percentage": st.column_config.NumberColumn(
+                "Profit/Loss %",
+                help="Profit/Loss %",
+                format="%.3f",
+            ),
+            "profit_today": st.column_config.NumberColumn(
+                "Today's Profit/Loss",
+                help="Today's Profit/Loss",
+                format="%.2f",
+            ),
+            "profit_percentage_today": st.column_config.NumberColumn(
+                "Today's Profit/Loss %",
+                help="Today's Profit/Loss %",
+                format="%.3f",
             ),
         },
         hide_index=True,
