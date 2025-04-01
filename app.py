@@ -30,8 +30,6 @@ if "profit_today" not in st.session_state:
     st.session_state["profit_today"] = float(0)
 if "profit_percentage" not in st.session_state:
     st.session_state["profit_percentage"] = float(0)
-if "previous_investment" not in st.session_state:
-    st.session_state["previous_investment"] = float(0)
 if "profit_percentage_today" not in st.session_state:
     st.session_state["profit_percentage_today"] = float(0)
 if "user_name" not in st.session_state:
@@ -175,6 +173,7 @@ def color_profit_loss(val):
 
 
 def calculate_prices(df):
+    previous_investment = float(0)
     tickers = get_prices(df)
     for index, symbol in df["symbol"].items():
         info = tickers[symbol].info
@@ -184,9 +183,7 @@ def calculate_prices(df):
         quantity = df.at[index, "quantity"]
         investment = buy_price * quantity
         current_value = price * quantity
-        st.session_state["previous_investment"] = st.session_state[
-            "previous_investment"
-        ] + (previous_close * quantity)
+        previous_investment = previous_investment + (previous_close * quantity)
         profit = current_value - investment
         profit_percentage = profit * 100 / investment
         profit_today = (price - previous_close) * quantity
@@ -210,9 +207,7 @@ def calculate_prices(df):
         )
         st.session_state["profit_today"] = df["profit_today"].sum()
         st.session_state["profit_percentage_today"] = (
-            st.session_state["profit_today"]
-            * 100
-            / st.session_state["previous_investment"]
+            st.session_state["profit_today"] * 100 / previous_investment
         )
 
     return df
