@@ -120,8 +120,11 @@ def find_prices(symbol: str):
     nifty = yf.Ticker(symbol)
     # current = nifty.history(period="5d")["Close"].iloc[-1]
     # last = nifty.history(period="5d")["Close"].iloc[-2]
-    current = nifty.history_metadata["regularMarketPrice"]
-    last = nifty.history_metadata["chartPreviousClose"]
+    # current = nifty.history_metadata["regularMarketPrice"]
+    # last = nifty.history_metadata["chartPreviousClose"]
+    info = nifty.info
+    current = info.get("regularMarketPrice")
+    last = info.get("previousClose")
     change = current - last
     percentage_change = (change / last) * 100
     current_formatted = f"₹{current:.2f}"
