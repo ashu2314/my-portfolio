@@ -512,29 +512,29 @@ def open_login_form():
 
 st.subheader("Market", divider="rainbow")
 current_nifty, change_nifty, percentage_change_nifty = find_prices("^NSEI")
-current_mid, change_mid, percentage_change_mid = find_prices("NIFTYMIDCAP150.NS")
-current_small, change_small, percentage_change_small = find_prices("NIFTYSMLCAP250.NS")
+current_mid, change_mid, percentage_change_mid = find_prices("NIFTY_MIDCAP_100.NS")
+current_small, change_small, percentage_change_small = find_prices("^CNXSC")
 current_bank, change_bank, percentage_change_bank = find_prices("^NSEBANK")
 col1, col2, col3, col4, col5 = st.columns(5)
-with col1:
+with col2:
     st.metric(
         label="Nifty",
         value=current_nifty,
         delta=f"{change_nifty} ({percentage_change_nifty})",
     )
-with col2:
+with col3:
     st.metric(
-        label="Midcap 150",
+        label="Midcap 100",
         value=current_mid,
         delta=f"{change_mid} ({percentage_change_mid})",
     )
-with col3:
+with col4:
     st.metric(
-        label="Smallcap 250",
+        label="Smallcap 100",
         value=current_small,
         delta=f"{change_small} ({percentage_change_small})",
     )
-with col4:
+with col1:
     st.metric(
         label="Bank Nifty",
         value=current_bank,
