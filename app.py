@@ -126,7 +126,7 @@ def find_prices(symbol: str):
     percentage_change = (change / last) * 100
     current_formatted = f"₹{current:.2f}"
     change_formatted = f"{change:.2f}"
-    percentage_change_formatted = f"{percentage_change:.2f}%"
+    percentage_change_formatted = f"{percentage_change:.3f}%"
     return current_formatted, change_formatted, percentage_change_formatted
 
 
