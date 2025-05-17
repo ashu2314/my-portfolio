@@ -518,31 +518,26 @@ current_bank, change_bank, percentage_change_bank = find_prices("^NSEBANK")
 col1, col2, col3, col4, col5 = st.columns(5)
 with col2:
     st.metric(
-        label=st.markdown("[Nifty](%s)" % "https://finance.yahoo.com/chart/^NSEI/"),
+        label="[Nifty](%s)" % "https://finance.yahoo.com/chart/^NSEI/",
         value=current_nifty,
         delta=f"{change_nifty} ({percentage_change_nifty})",
     )
 with col3:
     st.metric(
-        label=st.markdown(
-            "[Midcap 100](%s)" % "https://finance.yahoo.com/chart/NIFTY_MIDCAP_100.NS/"
-        ),
+        label="[Midcap 100](%s)"
+        % "https://finance.yahoo.com/chart/NIFTY_MIDCAP_100.NS/",
         value=current_mid,
         delta=f"{change_mid} ({percentage_change_mid})",
     )
 with col4:
     st.metric(
-        label=st.markdown(
-            "[Smallcap 100](%s)" % "https://finance.yahoo.com/chart/^CNXSC/"
-        ),
+        label="[Smallcap 100](%s)" % "https://finance.yahoo.com/chart/^CNXSC/",
         value=current_small,
         delta=f"{change_small} ({percentage_change_small})",
     )
 with col1:
     st.metric(
-        label=st.markdown(
-            "[Bank Nifty](%s)" % "https://finance.yahoo.com/chart/^NSEBANK/"
-        ),
+        label="[Bank Nifty](%s)" % "https://finance.yahoo.com/chart/^NSEBANK/",
         value=current_bank,
         delta=f"{change_bank} ({percentage_change_bank})",
     )
